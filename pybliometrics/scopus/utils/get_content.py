@@ -12,8 +12,9 @@ user_agent = 'pybliometrics-v' + __version__
 
 errors = {400: exception.Scopus400Error, 401: exception.Scopus401Error,
           403: exception.Scopus403Error, 404: exception.Scopus404Error,
-          407: exception.Scopus407Error, 413: exception.Scopus413Error, 
+          407: exception.Scopus407Error, 413: exception.Scopus413Error,
           414: exception.Scopus414Error, 429: exception.Scopus429Error}
+
 
 def get_session() -> Type[Session]:
     """Auxiliary function to create a session"""
@@ -84,6 +85,22 @@ def get_content(url, api, params=None, **kwds):
     params.update(**kwds)
     proxies = dict(config._sections.get("Proxy", {}))
 
+    # Digest Proxy Authentication
+    auth = None
+    proxies_auth = dict(config._sections.get("ProxyAuth", {}))
+    if proxies_auth:
+        if not proxies:
+            raise Exception("ProxyAuth is specified without Proxy")
+        if "type" not in proxies_auth:
+            raise Exception("ProxyAuth lacks 'type' entry")
+        if proxies_auth["type"] == "Digest":
+            from pybliometrics.scopus.utils.requests_digest_proxy import HTTPProxyDigestAuth
+            username = proxies_auth["username"]
+            password = proxies_auth["password"]
+            auth = HTTPProxyDigestAuth(username, password)
+        else:
+            raise Exception("Unknown proxy type")
+
     # Replace credentials if provided
     if "apikey" in params:
         header['X-ELS-APIKey'] = params.pop("apikey")
@@ -100,14 +117,14 @@ def get_content(url, api, params=None, **kwds):
     # Perform request, eventually replacing the current key
     timeout = config.getint("Requests", "Timeout", fallback=20)
     resp = session.get(url, headers=header, proxies=proxies, params=params,
-                      timeout=timeout)
+                       timeout=timeout, auth=auth)
     while resp.status_code == 429:
         try:
             keys.pop(0)  # Remove current key
             shuffle(keys)
             header['X-ELS-APIKey'] = keys[0].strip()
             resp = session.get(url, headers=header, proxies=proxies,
-                               params=params, timeout=timeout)
+                               params=params, timeout=timeout, auth=auth)
         except IndexError:  # All keys depleted
             break
     _throttling_params[api].append(time())
