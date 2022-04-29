@@ -70,6 +70,13 @@ def get_content(url, api, params=None, **kwds):
     params = params or {}
     params.update(**kwds)
     proxies = dict(config._sections.get("Proxy", {}))
+    
+    # Digest Proxy Authentication
+    auth = None
+    proxies_auth = dict(config._sections.get("ProxyAuth", {}))
+    if proxies_auth and "type" in proxies_auth and proxies_auth["type"]=="Digest":
+        from pybliometrics.scopus.utils.requests_digest_proxy import HTTPProxyDigestAuth
+        auth = HTTPProxyDigestAuth(proxies_auth["username"], proxies_auth["password"])
 
     # Replace credentials if provided
     if "apikey" in params:
@@ -87,14 +94,14 @@ def get_content(url, api, params=None, **kwds):
     # Perform request, eventually replacing the current key
     timeout = config.getint("Requests", "Timeout", fallback=20)
     resp = session.get(url, headers=header, proxies=proxies, params=params,
-                      timeout=timeout)
+                      timeout=timeout, auth=auth)
     while resp.status_code == 429:
         try:
             KEYS.pop(0)  # Remove current key
             shuffle(KEYS)
             header['X-ELS-APIKey'] = KEYS[0].strip()
             resp = session.get(url, headers=header, proxies=proxies,
-                               params=params, timeout=timeout)
+                               params=params, timeout=timeout, auth=auth)
         except IndexError:  # All keys depleted
             break
     _throttling_params[api].append(time())
